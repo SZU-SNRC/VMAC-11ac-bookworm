@@ -963,7 +963,8 @@ void _rtw_free_xmit_priv(struct xmit_priv *pxmitpriv);
 void rtw_alloc_hwxmits(_adapter *padapter);
 void rtw_free_hwxmits(_adapter *padapter);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 24))
-s32 rtw_monitor_xmit_entry(struct sk_buff *skb, struct net_device *ndev);
+// s32 rtw_monitor_xmit_entry(struct sk_buff *skb, struct net_device *ndev);
+s32 rtw_monitor_xmit_entry(struct sk_buff *skb, _adapter *padapter);
 #endif
 s32 rtw_xmit_posthandle(_adapter *padapter, struct xmit_frame *pxmitframe, _pkt *pkt);
 s32 rtw_xmit(_adapter *padapter, _pkt **pkt);

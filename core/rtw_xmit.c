@@ -17,6 +17,299 @@
 #include <drv_types.h>
 #include <hal_data.h>
 #include <net/cfg80211.h>
+#include "vmac.h"
+#include "tx.h"
+
+DECLARE_HASHTABLE(rx_enc, 20);
+DECLARE_HASHTABLE(tx_enc, 20);
+struct sock *nl_sk = NULL;
+
+const struct cfg80211_ops mac80211_config_ops = {}; // just a hack to build and integrate within kernel...
+
+_adapter *mon_adapter = NULL;
+
+int pidt;
+int configured = _FALSE;
+
+/**
+ * @brief      returns PID of userspace process
+ *
+ * @return     PID (int)
+ */
+int getpidt(void)
+{
+	return pidt;
+}
+
+void vmac_send_hack(struct sk_buff *skb)
+{
+	vmac_low_tx(skb, 0, 1, 0, 1, 0, mon_adapter);
+}
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 24))
+// static struct xmit_frame *monitor_alloc_mgtxmitframe(struct xmit_priv *pxmitpriv)
+// {
+// 	int tries;
+// 	int delay = 300;
+// 	struct xmit_frame *pmgntframe = NULL;
+
+// 	for (tries = 3; tries >= 0; tries--)
+// 	{
+// 		pmgntframe = alloc_mgtxmitframe(pxmitpriv);
+// 		if (pmgntframe != NULL)
+// 			return pmgntframe;
+// 		rtw_udelay_os(delay);
+// 		delay += delay / 2;
+// 	}
+// 	return NULL;
+// }
+
+/*s32 xmit_mo(struct sk_buff *skb, _adapter *padapter, u8 rate, u8 bw, u8 sgi, u8 stream)
+{
+	int ret = 0;
+	int rtap_len;
+	int qos_len = 0;
+	int dot11_hdr_len = 24;
+	int snap_len = 6;
+	unsigned char *pdata;
+	u16 frame_ctl;
+	unsigned char src_mac_addr[6];
+	unsigned char dst_mac_addr[6];
+	struct rtw_ieee80211_hdr *dot11_hdr;
+	struct ieee80211_radiotap_header *rtap_hdr;
+	struct ieee80211_radiotap_iterator iterator;
+	u8 fixed_rate = MGN_1M, bwidth = 0, ldpc = 0, stbc = 0;
+	u16 txflags = 0;
+	//_adapter *padapter = (_adapter *)rtw_netdev_priv(ndev);
+
+	struct xmit_frame		*pmgntframe;
+	struct pkt_attrib	*pattrib;
+	unsigned char	*pframe;
+	struct rtw_ieee80211_hdr *pwlanhdr;
+	struct xmit_priv	*pxmitpriv = &(padapter->xmitpriv);
+	struct mlme_ext_priv	*pmlmeext = &(padapter->mlmeextpriv);
+	u8 *buf = skb->data;
+	u32 len = skb->len;
+	u8 category, action;
+	int type = -1;
+	printk(KERN_INFO "Sending at rate %u, %u, %u\n", rate, bw, sgi);
+	if (skb)
+		rtw_mstat_update(MSTAT_TYPE_SKB, MSTAT_ALLOC_SUCCESS, skb->truesize);
+
+	if ((pmgntframe = monitor_alloc_mgtxmitframe(pxmitpriv)) == NULL) {
+		DBG_COUNTER(padapter->tx_logs.core_tx_err_pxmitframe);
+		return NETDEV_TX_BUSY;
+	}
+
+
+	pattrib = &pmgntframe->attrib;
+	update_monitor_frame_attrib(padapter, pattrib);
+
+	_rtw_memset(pmgntframe->buf_addr, 0, WLANHDR_OFFSET + TXDESC_OFFSET);
+
+	pframe = (u8 *)(pmgntframe->buf_addr) + TXDESC_OFFSET;
+
+	_rtw_memcpy(pframe, (void*)skb->data, skb->len);
+
+	pattrib->pktlen = skb->len;
+
+	//printk("**** rt mcs %x rate %x raid %d sgi %d bwidth %d ldpc %d stbc %d txflags %x\n", fixed_rate, pattrib->rate, pattrib->raid, sgi, bwidth, ldpc, stbc, txflags);
+	//pattrib->rate = MGN_MCS0 + rate;
+	if (stream == 0){
+		pattrib->rate = MGN_VHT1SS_MCS0;
+	}
+	else{
+		pattrib->rate = MGN_VHT2SS_MCS0;
+	}
+	pattrib->rate += rate;
+//	pattrib->ht_en = _TRUE;
+	pattrib->sgi = sgi;
+	pattrib->bwmode = bw; // 0-20 MHz, 1-40 MHz, 2-80 MHz
+	pattrib->ldpc = ldpc;
+	pattrib->stbc = stbc;
+	pattrib->retry_ctrl = _FALSE;
+
+
+	pwlanhdr = (struct rtw_ieee80211_hdr *)pframe;
+
+	pmlmeext->mgnt_seq = GetSequence(pwlanhdr);
+	pattrib->seqnum = pmlmeext->mgnt_seq;
+	pmlmeext->mgnt_seq++;
+
+	pattrib->last_txcmdsz = pattrib->pktlen;
+	dump_mgntframe(padapter, pmgntframe);
+	DBG_COUNTER(padapter->tx_logs.core_tx);
+	pxmitpriv->tx_pkts++;
+	pxmitpriv->tx_bytes += skb->len;
+	pattrib->raid = RATEID_IDX_BGN_40M_1SS;
+fail:
+	rtw_skb_free(skb);
+	return NETDEV_TX_OK;
+}
+
+*/
+
+/**
+ * @brief      returns socket to userspace (netlink socket)
+ *
+ * @return     socket
+ */
+struct sock *getsock(void)
+{
+	return nl_sk;
+}
+
+struct encoding_tx *find_tx(int table, u64 enc)
+{
+	struct encoding_tx *vmact, *ret = NULL;
+	hash_for_each_possible(tx_enc, vmact, node, enc)
+	{
+		ret = vmact;
+	}
+	return ret;
+}
+void add_rx(struct encoding_rx *vmacr)
+{
+	hash_add(rx_enc, &vmacr->node, vmacr->key);
+}
+
+void add_tx(struct encoding_tx *vmact)
+{
+	hash_add(tx_enc, &vmact->node, vmact->key);
+}
+
+struct encoding_rx *find_rx(int table, u64 enc)
+{
+	struct encoding_rx *vmacr, *ret = NULL;
+	hash_for_each_possible(rx_enc, vmacr, node, enc)
+	{
+		ret = vmacr;
+	}
+	return ret;
+}
+
+void exit_vmac()
+{
+	printk(KERN_INFO "EXIT-VMAC is called!\n");
+	netlink_kernel_release(nl_sk);
+}
+
+void fake_send(struct sk_buff *skb, u8 rate, u8 bw, u8 sgi, u8 stream)
+{
+	struct ieee80211_radiotap_header *rtap_hdr = NULL;
+	u8 src[ETH_ALEN] __aligned(2) = {0x00, 0xc0, 0xca, 0xa8, 0xf2, 0xa2};
+	u8 dest[ETH_ALEN] __aligned(2) = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+	u8 bssid[ETH_ALEN] __aligned(2) = {0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe};
+	struct ieee80211_hdr hdr;
+	int ret;
+	u8 hdr_buf[64] = {0};
+	u32 tmp_32bit = 0;
+	u16 rt_len = 8;
+	u8 mcs_have = 0;
+	u8 flags = 0;
+	u8 mcs = 2;
+	u8 *ptr = NULL;
+	u16 txflags = IEEE80211_RADIOTAP_F_TX_NOACK;
+	// printk(KERN_INFO "WE ARE HERE AT FAKE SEN  using source mac ADDRESS~ %s %s %d\n", __FILE__, __FUNCTION__, __LINE__);
+	// ret = rtw_hal_init_xmit_priv(mon_adapter);
+	// printk(KERN_INFO "INIT value is %d, %s %s %d\n", ret, __FILE__, __FUNCTION__, __LINE__);
+	memcpy(hdr.addr1, dest, ETH_ALEN); // was target
+	memcpy(hdr.addr2, src, ETH_ALEN);  // was target
+	memcpy(hdr.addr3, bssid, ETH_ALEN);
+	hdr.frame_control = cpu_to_le16(IEEE80211_FTYPE_DATA | IEEE80211_STYPE_DATA);
+	memcpy(skb_push(skb, sizeof(struct ieee80211_hdr)), &hdr, sizeof(struct ieee80211_hdr));
+	ret = xmit_mo(skb, mon_adapter, rate, bw, sgi, stream);
+	// printk(KERN_INFO "VALUE we got is %d, %s %s %d\n", ret, __FILE__, __FUNCTION__, __LINE__);
+}
+
+/**
+ * @brief      Netlink Receive from userspace function
+ *
+ * @param      skb received frame from userspace
+ *
+ */
+static void nl_recv(struct sk_buff *skb)
+{
+	struct nlmsghdr *nlh;
+	struct sk_buff *skb2;
+	struct control rxc;
+	u64 enc;
+	u8 type;
+	int size;
+	nlh = (struct nlmsghdr *)skb->data;
+	type = nlh->nlmsg_type;
+	if (pidt != nlh->nlmsg_pid)
+		pidt = nlh->nlmsg_pid;
+
+	printk(KERN_INFO "RECEIVED DATA from USERPSACE, TYPE is %d; %s %s %d\n", type, __FILE__, __FUNCTION__, __LINE__);
+	
+
+	if (type == VMAC_HDR_INTEREST || type == VMAC_HDR_DATA || type == VMAC_HDR_ANOUNCMENT || type == VMAC_HDR_INJECTED)
+	{
+		// printk(KERN_INFO "22FRAME CAME OVER HERE %s %s %d\n", __FILE__, __FUNCTION__, __LINE__);
+		skb2 = dev_alloc_skb(nlh->nlmsg_len + 100); // -10 was here
+		size = nlh->nlmsg_len - 100;
+		memcpy(&rxc, nlmsg_data(nlh), sizeof(struct control));
+		if (skb2 == NULL)
+		{
+			printk(KERN_INFO "VMAC_ERROR: FAILED TO ALLOCATE Memory %s %s %d\n", __FILE__, __FUNCTION__, __LINE__);
+			return;
+		}
+		skb_reserve(skb2, 100);
+		enc = (*(uint64_t *)(rxc.enc));
+		memcpy(skb_put(skb2, size), nlmsg_data(nlh) + sizeof(struct control), size);
+		// printk(KERN_INFO "CALLING TX %s %s %d\n", __FILE__, __FUNCTION__, __LINE__);
+		// print msg from userspace
+		#ifdef DEBUG_KB
+			printk(KERN_INFO "Ready Send a msg: Package type: %d, Enc s: %s, Enc hex:0x%llx\n", nlh->nlmsg_type, rxc.enc,enc);
+			print_hex_dump(KERN_DEBUG, "raw data: ", DUMP_PREFIX_ADDRESS,
+                       16, 1, nlmsg_data(nlh) + sizeof(struct control), 6, true);
+		#endif
+		// 将用户数据发给vmac
+		vmac_tx(skb2, enc, type, &rxc.seq[0], rxc.rate, rxc.bw, rxc.sgi, rxc.stream, mon_adapter);
+	}
+	else if (type == 254)
+	{
+		exit_vmac();
+	}
+	else if (type == 255)
+		printk(KERN_INFO "VMAC-upper: userspace PID Registered\n");
+	else
+	{
+		printk(KERN_INFO "ERROR: Unknown type of frame, discarding, please contact author\n");
+	}
+}
+
+#endif
+/**
+ * @brief      Initialize V-MAC and start kthreads
+ *
+ * @return     0
+ */
+int vmac_init(void)
+{
+	if (configured == _TRUE)
+	{
+		return 1;
+	}
+	struct netlink_kernel_cfg cfg = {.input = nl_recv};
+	pidt = -1;
+
+	nl_sk = netlink_kernel_create(&init_net, VMAC_USER, &cfg);
+	if (!nl_sk)
+	{
+		printk(KERN_ALERT "VMAC FAILED ERROR: Please contact author\n");
+		return -1;
+	}
+
+	printk(KERN_INFO "VMAC: Installed sucessfully.\n");
+	configured = _TRUE;
+	return 0;
+}
+#if defined(PLATFORM_LINUX) && defined(PLATFORM_WINDOWS)
+#error "Shall be Linux or Windows, but not both!\n"
+#endif
+
 
 static u8 P802_1H_OUI[P80211_OUI_LEN] = { 0x00, 0x00, 0xf8 };
 static u8 RFC1042_OUI[P80211_OUI_LEN] = { 0x00, 0x00, 0x00 };
@@ -63,6 +356,8 @@ void rtw_free_xmit_block(_adapter *padapter)
 	_rtw_spinlock_free(&dvobj->xmit_block_lock);
 }
 
+
+//todo :add vmac init
 s32	_rtw_init_xmit_priv(struct xmit_priv *pxmitpriv, _adapter *padapter)
 {
 	int i;
@@ -70,10 +365,13 @@ s32	_rtw_init_xmit_priv(struct xmit_priv *pxmitpriv, _adapter *padapter)
 	struct xmit_frame *pxframe;
 	sint	res = _SUCCESS;
 
+	//add vmac init
+
 
 	/* We don't need to memset padapter->XXX to zero, because adapter is allocated by rtw_zvmalloc(). */
 	/* _rtw_memset((unsigned char *)pxmitpriv, 0, sizeof(struct xmit_priv)); */
-
+	mon_adapter = padapter;
+	vmac_init();
 	_rtw_spinlock_init(&pxmitpriv->lock);
 	_rtw_spinlock_init(&pxmitpriv->lock_sctx);
 	_rtw_init_sema(&pxmitpriv->xmit_sema, 0);
@@ -4398,10 +4696,13 @@ static void do_queue_select(_adapter	*padapter, struct pkt_attrib *pattrib)
  *	<0	fail
  */
  #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 24))
-s32 rtw_monitor_xmit_entry(struct sk_buff *skb, struct net_device *ndev)
+ //todo: change function name
+// s32 rtw_monitor_xmit_entry(struct sk_buff *skb, struct net_device *ndev)
+s32 rtw_monitor_xmit_entry(struct sk_buff *skb, _adapter *padapter)
 {
 	u16 frame_ctl;
-	_adapter *padapter = (_adapter *)rtw_netdev_priv(ndev);
+	//todo:remove
+	// _adapter *padapter = (_adapter *)rtw_netdev_priv(ndev);
 	struct pkt_file pktfile;
 	struct rtw_ieee80211_hdr *pwlanhdr;
 	struct pkt_attrib	*pattrib;

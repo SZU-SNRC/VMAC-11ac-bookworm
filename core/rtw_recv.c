@@ -16,7 +16,7 @@
 
 #include <drv_types.h>
 #include <hal_data.h>
-
+#include "rx.h"
 #ifdef CONFIG_NEW_SIGNAL_STAT_PROCESS
 static void rtw_signal_stat_timer_hdl(void *ctx);
 
@@ -4290,6 +4290,81 @@ static sint fill_radiotap_hdr(_adapter *padapter, union recv_frame *precvframe, 
 
 }
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 24))
+
+// todo: add vmac_override function 
+int vmac_override(_adapter *padapter, union recv_frame *precv_frame)
+{
+	// printk(KERN_INFO "calling vmac_override %s %s %d\n", __FILE__, __FUNCTION__, __LINE__);
+	int ret = _FAIL;
+	struct recv_priv *precvpriv;
+	_queue *pfree_recv_queue;
+	struct sk_buff *skb;
+	struct mlme_priv *pmlmepriv = &padapter->mlmepriv;
+	u8 *wlanhdr;
+	struct ieee80211_hdr *hdr;
+	struct ieee80211_radiotap_header *rtap;
+	wlanhdr = get_recvframe_data(precv_frame);
+	u8 *pbssid;
+	int i;
+	u8 *ptr = precv_frame->u.hdr.rx_data + sizeof(struct ieee80211_radiotap_header);
+	struct rx_pkt_attrib *pattrib = &precv_frame->u.hdr.attrib;
+
+	if (NULL == precv_frame)
+	{
+		printk(KERN_INFO "DROPPING\n");
+		goto _recv_drop;
+	}
+
+	pattrib = &precv_frame->u.hdr.attrib;
+	precvpriv = &(padapter->recvpriv);
+	pfree_recv_queue = &(precvpriv->free_recv_queue);
+
+	skb = precv_frame->u.hdr.pkt;
+
+	if (skb == NULL)
+	{
+		RTW_INFO("%s :skb==NULL something wrong!!!!\n", __func__);
+		goto _recv_drop;
+	}
+	skb->data = precv_frame->u.hdr.rx_data;
+	skb_set_tail_pointer(skb, precv_frame->u.hdr.len);
+	skb->len = precv_frame->u.hdr.len;
+	skb->ip_summed = CHECKSUM_NONE;
+	skb->pkt_type = PACKET_OTHERHOST;
+	skb->protocol = htons(0x0019); /* ETH_P_80211_RAW */
+	rtap = (struct ieee80211_radiotap_header *)skb->data;
+	hdr = (struct ieee80211_hdr *)(skb->data + rtap->it_len);
+	precv_frame->u.hdr.pkt = NULL;
+
+	if (hdr->addr3[0] == 0xfe && hdr->addr3[1] == 0xfe && hdr->addr3[2] == 0xfe)
+	{
+		skb_pull(skb, rtap->it_len);
+		skb_pull(skb, sizeof(struct ieee80211_hdr));
+		// rtw_skb_free(skb);	/* should call rx_vmac here */
+		vmac_rx(skb); // skb will be free in nl_send
+		// printk(KERN_INFO "after the v_mac_rx %s %s %d\n", __FILE__, __FUNCTION__, __LINE__);
+	}
+	else
+	{
+		rtw_skb_free(skb);
+	}
+	/* pointers to NULL before rtw_free_recvframe() */
+
+	ret = _SUCCESS;
+
+_recv_drop:
+
+	/* enqueue back to free_recv_queue */
+	if (precv_frame)
+	{
+		rtw_free_recvframe(precv_frame, pfree_recv_queue);
+		// printk(KERN_INFO "calling rtw_free_recvframe %s %s %d\n", __FILE__, __FUNCTION__, __LINE__);
+	}
+
+	return ret;
+}
+
+// todo: call vmac_override
 int recv_frame_monitor(_adapter *padapter, union recv_frame *rframe)
 {
 	int ret = _SUCCESS;
@@ -4320,13 +4395,18 @@ int recv_frame_monitor(_adapter *padapter, union recv_frame *rframe)
 
 	if (!RTW_CANNOT_RUN(padapter)) {
 		/* indicate this recv_frame */
-		ret = rtw_recv_monitor(padapter, rframe);
+		//todo: del orin monitor, call vmac_override
+		// ret = rtw_recv_monitor(padapter, rframe);
+		ret = vmac_override(padapter, rframe);
 		if (ret != _SUCCESS) {
+			// todo :printk monitor log
+			printk(KERN_INFO "vmac monitor failed...%s %s %d\n",__FILE__, __FUNCTION__, __LINE__);
 			ret = _FAIL;
 			rtw_free_recvframe(rframe, pfree_recv_queue); /* free this recv_frame */
 			goto exit;
 		}
 	} else {
+		
 		ret = _FAIL;
 		rtw_free_recvframe(rframe, pfree_recv_queue); /* free this recv_frame */
 		goto exit;

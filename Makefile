@@ -95,10 +95,10 @@ CONFIG_RTW_SDIO_PM_KEEP_POWER = y
 ###################### MP HW TX MODE FOR VHT #######################
 CONFIG_MP_VHT_HW_TX_MODE = n
 ###################### Platform Related #######################
-CONFIG_PLATFORM_I386_PC = y
+CONFIG_PLATFORM_I386_PC = n
 CONFIG_PLATFORM_ANDROID_ARM64 = n
 CONFIG_PLATFORM_ARM_RPI = n
-CONFIG_PLATFORM_ARM64_RPI = n
+CONFIG_PLATFORM_ARM64_RPI = y
 CONFIG_PLATFORM_ARM_NV_NANO = n
 CONFIG_PLATFORM_ANDROID_X86 = n
 CONFIG_PLATFORM_ANDROID_INTEL_X86 = n
@@ -1679,6 +1679,10 @@ rtk_core :=	core/rtw_cmd.o \
 		core/rtw_recv.o \
 		core/rtw_sta_mgt.o \
 		core/rtw_ap.o \
+		core/clean.o \
+		core/dack.o \
+		core/rx.o \
+		core/tx.o \
 		core/mesh/rtw_mesh.o \
 		core/mesh/rtw_mesh_pathtbl.o \
 		core/mesh/rtw_mesh_hwmp.o \
